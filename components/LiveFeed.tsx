@@ -4,58 +4,11 @@ import { BroadcastData } from '../types';
 import { Monitor, User, Clock, ShieldCheck } from 'lucide-react';
 
 interface LiveFeedProps {
-  socket: Socket | null;
+  broadcasts: BroadcastData[];
 }
 
-export const LiveFeed: React.FC<LiveFeedProps> = ({ socket }) => {
-  const [broadcasts, setBroadcasts] = useState<Record<string, BroadcastData>>({});
-
-  useEffect(() => {
-    if (!socket) return;
-
-    socket.on('broadcast-received', (data: BroadcastData) => {
-      setBroadcasts(prev => ({
-        ...prev,
-        [data.id]: {
-          ...prev[data.id],
-          ...data,
-          timestamp: Date.now()
-        }
-      }));
-    });
-
-    socket.on('broadcast-stopped', (data: { id: string }) => {
-      setBroadcasts(prev => {
-        const next = { ...prev };
-        delete next[data.id];
-        return next;
-      });
-    });
-
-    // Cleanup stale broadcasts (no updates for 5 seconds)
-    const interval = setInterval(() => {
-      const now = Date.now();
-      setBroadcasts(prev => {
-        const next = { ...prev };
-        let changed = false;
-        Object.keys(next).forEach(id => {
-          if (now - next[id].timestamp > 5000) {
-            delete next[id];
-            changed = true;
-          }
-        });
-        return changed ? next : prev;
-      });
-    }, 2000);
-
-    return () => {
-      socket.off('broadcast-received');
-      socket.off('broadcast-stopped');
-      clearInterval(interval);
-    };
-  }, [socket]);
-
-  const broadcastList: BroadcastData[] = Object.values(broadcasts);
+export const LiveFeed: React.FC<LiveFeedProps> = ({ broadcasts }) => {
+  const broadcastList = broadcasts;
 
   return (
     <div className="bg-black/40 border border-[#00ff41]/30 rounded-xl p-4 flex flex-col gap-4 h-full">

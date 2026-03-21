@@ -5,9 +5,10 @@ import { BroadcastData } from '../types';
 
 interface BroadcastPanelProps {
   socket: Socket | null;
+  userLocation: { lat: number, lng: number } | null;
 }
 
-export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket }) => {
+export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket, userLocation }) => {
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [hasCamera, setHasCamera] = useState(false);
   const [hasMic, setHasMic] = useState(false);
@@ -39,7 +40,12 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket }) => {
         if (e.data.size > 0 && isBroadcasting) {
           const reader = new FileReader();
           reader.onloadend = () => {
-            socket?.emit('broadcast-stream', { audio: reader.result, timestamp: Date.now() });
+            socket?.emit('broadcast-stream', { 
+              audio: reader.result, 
+              timestamp: Date.now(),
+              lat: userLocation?.lat,
+              lng: userLocation?.lng
+            });
           };
           reader.readAsDataURL(e.data);
         }
@@ -72,12 +78,20 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket }) => {
         startMedia(facingMode).then(() => {
           setIsBroadcasting(true);
           audioRecorderRef.current?.start(1000); // Send audio every 1s
-          socket?.emit('broadcast-start', { timestamp: Date.now() });
+          socket?.emit('broadcast-start', { 
+            timestamp: Date.now(),
+            lat: userLocation?.lat,
+            lng: userLocation?.lng
+          });
         });
       } else {
         setIsBroadcasting(true);
         audioRecorderRef.current?.start(1000);
-        socket?.emit('broadcast-start', { timestamp: Date.now() });
+        socket?.emit('broadcast-start', { 
+          timestamp: Date.now(),
+          lat: userLocation?.lat,
+          lng: userLocation?.lng
+        });
       }
     } else {
       setIsBroadcasting(false);
@@ -110,7 +124,12 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket }) => {
         canvasRef.current.height = videoRef.current.videoHeight;
         context.drawImage(videoRef.current, 0, 0);
         const imageData = canvasRef.current.toDataURL('image/jpeg', 0.8);
-        socket?.emit('broadcast-stream', { image: imageData, timestamp: Date.now() });
+        socket?.emit('broadcast-stream', { 
+          image: imageData, 
+          timestamp: Date.now(),
+          lat: userLocation?.lat,
+          lng: userLocation?.lng
+        });
       }
     }
   };
@@ -125,12 +144,17 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket }) => {
           canvasRef.current!.height = 120;
           context.drawImage(videoRef.current, 0, 0, 160, 120);
           const frameData = canvasRef.current!.toDataURL('image/jpeg', 0.5);
-          socket.emit('broadcast-stream', { video: frameData, timestamp: Date.now() });
+          socket.emit('broadcast-stream', { 
+            video: frameData, 
+            timestamp: Date.now(),
+            lat: userLocation?.lat,
+            lng: userLocation?.lng
+          });
         }
       }, 200); // 5 FPS for broadcast
     }
     return () => clearInterval(interval);
-  }, [isBroadcasting, socket]);
+  }, [isBroadcasting, socket, userLocation]);
 
   return (
     <div className="bg-black/40 border border-[#00ff41]/30 rounded-xl p-4 flex flex-col gap-4">

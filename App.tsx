@@ -5,7 +5,7 @@ import { FrequencyScanner } from './components/FrequencyScanner';
 import { SignalMap } from './components/SignalMap';
 import { LogPanel } from './components/LogPanel';
 import { SignatureMatcher } from './components/SignatureMatcher';
-import { Recording, FreqPoint, FreqType, LogEntry, SignalNode, FrequencyCategory } from './types';
+import { Recording, FreqPoint, FreqType, LogEntry, SignalNode, FrequencyCategory, BroadcastData } from './types';
 import { analyzeSpectralData } from './services/geminiService';
 import { MapPin, Navigation, Shield, AlertTriangle, Activity, List, Settings, Radio, Volume2, VolumeX, Camera } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
@@ -46,6 +46,7 @@ const App: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [activeTab, setActiveTab] = useState<'SCANNER' | 'MAP' | 'LOGS' | 'INTEL' | 'BROADCAST'>('SCANNER');
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [broadcasts, setBroadcasts] = useState<Record<string, BroadcastData>>({});
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -58,9 +59,48 @@ const App: React.FC = () => {
   useEffect(() => {
     const newSocket = io();
     setSocket(newSocket);
+
+    newSocket.on('broadcast-received', (data: BroadcastData) => {
+      setBroadcasts(prev => ({
+        ...prev,
+        [data.id]: {
+          ...prev[data.id],
+          ...data,
+          timestamp: Date.now()
+        }
+      }));
+    });
+
+    newSocket.on('broadcast-stopped', (data: { id: string }) => {
+      setBroadcasts(prev => {
+        const next = { ...prev };
+        delete next[data.id];
+        return next;
+      });
+    });
+
     return () => {
       newSocket.close();
     };
+  }, []);
+
+  // Cleanup stale broadcasts
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setBroadcasts(prev => {
+        const next = { ...prev };
+        let changed = false;
+        Object.keys(next).forEach(id => {
+          if (now - next[id].timestamp > 5000) {
+            delete next[id];
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    }, 2000);
+    return () => clearInterval(interval);
   }, []);
 
   // Initialize some nodes
@@ -487,8 +527,8 @@ const App: React.FC = () => {
         <div className={`xl:col-span-3 flex flex-col gap-4 ${activeTab === 'LOGS' || activeTab === 'BROADCAST' ? 'flex' : 'hidden xl:flex'}`}>
           {/* Broadcast & Live Feed (Visible on xl or when activeTab is BROADCAST) */}
           <div className={`${activeTab === 'BROADCAST' ? 'flex' : 'hidden xl:flex'} flex-col gap-4`}>
-            <BroadcastPanel socket={socket} />
-            <LiveFeed socket={socket} />
+            <BroadcastPanel socket={socket} userLocation={userLocation} />
+            <LiveFeed broadcasts={Object.values(broadcasts)} />
           </div>
 
           {/* Band Monitoring & Logs (Visible on xl or when activeTab is LOGS) */}
@@ -559,6 +599,7 @@ const App: React.FC = () => {
                 jammerTargetId={jammerTargetId}
                 isJamming={jammerConfig.isActive}
                 onJam={handleJamSignal}
+                broadcasts={Object.values(broadcasts)}
               />
             </div>
             

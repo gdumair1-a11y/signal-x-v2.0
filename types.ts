@@ -82,6 +82,8 @@ export interface BroadcastData {
   image?: string; // base64
   timestamp: number;
   userName?: string;
+  lat?: number;
+  lng?: number;
 }
 
 export interface BroadcastState {

@@ -2,8 +2,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, Circle } from 'react-leaflet';
 import L from 'leaflet';
-import { SignalNode, FrequencyCategory, NodeType } from '../types';
-import { Crosshair, Map as MapIcon, Layers, Satellite, Radar, Loader2, Navigation, Shield } from 'lucide-react';
+import { SignalNode, FrequencyCategory, NodeType, BroadcastData } from '../types';
+import { Crosshair, Map as MapIcon, Layers, Satellite, Radar, Loader2, Navigation, Shield, Monitor, User } from 'lucide-react';
 
 // Fix Leaflet marker icon issue
 import 'leaflet/dist/leaflet.css';
@@ -20,6 +20,12 @@ const victimIcon = createIcon('#22c55e');
 const protectedVictimIcon = createIcon('#3b82f6');
 const stalkerIcon = createIcon('#ef4444');
 const relayIcon = createIcon('#3b82f6');
+const broadcastIcon = L.divIcon({
+  className: 'custom-div-icon',
+  html: `<div style="background-color: #00ff41; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 15px #00ff41; display: flex; items-center; justify-center;"><div style="width: 6px; height: 6px; background-color: white; border-radius: 50%; animation: pulse 1s infinite;"></div></div>`,
+  iconSize: [16, 16],
+  iconAnchor: [8, 8]
+});
 
 interface Props {
   nodes: SignalNode[];
@@ -37,6 +43,7 @@ interface Props {
   isJamming?: boolean;
   onJam?: (nodeId: string) => void;
   onReceive?: (frequency: number) => void;
+  broadcasts?: BroadcastData[];
 }
 
 // Component to handle map center and zoom
@@ -68,7 +75,8 @@ export const SignalMap: React.FC<Props> = ({
   jammerTargetId,
   isJamming,
   onJam,
-  onReceive
+  onReceive,
+  broadcasts = []
 }) => {
   const [isSatellite, setIsSatellite] = useState(false);
   const [scanRadius, setScanRadius] = useState(0);
@@ -179,6 +187,59 @@ export const SignalMap: React.FC<Props> = ({
               />
             )}
             
+            {broadcasts.map(broadcast => {
+              if (broadcast.lat === undefined || broadcast.lng === undefined) return null;
+              const pos: [number, number] = [broadcast.lat, broadcast.lng];
+              
+              return (
+                <Marker 
+                  key={`broadcast-${broadcast.id}`} 
+                  position={pos} 
+                  icon={broadcastIcon}
+                >
+                  <Popup className="custom-popup">
+                    <div className="bg-zinc-900 text-[#00ff41] p-2 font-mono text-[10px] border border-[#00ff41]/30 rounded w-48">
+                      <div className="font-black border-b border-[#00ff41]/20 pb-1 mb-2 uppercase flex items-center gap-2">
+                        <Monitor className="w-3 h-3" />
+                        LIVE_FEED: {broadcast.id.slice(0, 6).toUpperCase()}
+                      </div>
+                      
+                      <div className="aspect-video bg-black rounded border border-[#00ff41]/20 overflow-hidden mb-2 relative">
+                        {broadcast.video ? (
+                          <img 
+                            src={broadcast.video} 
+                            alt="Live Feed" 
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : broadcast.image ? (
+                          <img 
+                            src={broadcast.image} 
+                            alt="Snapshot" 
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="absolute inset-0 flex items-center justify-center text-[8px] opacity-50">
+                            SIGNAL_ACQUIRING...
+                          </div>
+                        )}
+                        <div className="absolute top-1 left-1 px-1 bg-red-600 text-white text-[6px] font-bold rounded animate-pulse">LIVE</div>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 text-[8px] opacity-70">
+                        <User className="w-2 h-2" />
+                        <span>NODE_ID: {broadcast.id}</span>
+                      </div>
+                      <div className="text-[6px] mt-1 text-zinc-500 italic uppercase">
+                        GEOSPATIAL_BROADCAST_ACTIVE
+                      </div>
+                    </div>
+                  </Popup>
+                </Marker>
+              );
+            })}
+
             {filteredNodes.map(node => {
               if (node.lat === undefined || node.lng === undefined) return null;
               
