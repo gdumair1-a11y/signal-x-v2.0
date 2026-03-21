@@ -1,0 +1,9 @@
+{
+  "name": "Ai cam: umair FrequencyVoice-V2K",
+  "description": "An advanced signal processing and multi-frequency voice recording suite. Features real-time spectral analysis, band-pass filtering, and AI-driven pattern detection for anomalous frequency bands.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation",
+    "camera"
+  ]
+}
