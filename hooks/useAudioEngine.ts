@@ -1,11 +1,11 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { AudioFilterConfig, BandPower, FreqPoint } from '../types';
+import { AudioFilterConfig, BandPower, FreqPoint, AutoRecordConfig, Recording, FrequencyCategory } from '../types';
 
 export function useAudioEngine() {
   const [isActive, setIsActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [bandPowers, setBandPowers] = useState<BandPower[]>([
+  const DEFAULT_BANDS: BandPower[] = [
     { label: 'SUB', category: 'SUB', frequency: 60, power: 0 },
     { label: 'V2K_L', category: 'VOICE', frequency: 440, power: 0 },
     { label: 'V2K_H', category: 'VOICE', frequency: 2500, power: 0 },
@@ -14,7 +14,24 @@ export function useAudioEngine() {
     { label: 'EMF_STATIC', category: 'EMF', frequency: 50, power: 0 },
     { label: 'BIO_ORG', category: 'BIO_ORGAN', frequency: 7.83, power: 0 },
     { label: 'CIRCULAR', category: 'CIRCULAR', frequency: 1000, power: 0 },
-  ]);
+  ];
+
+  const [bandPowers, setBandPowers] = useState<BandPower[]>(() => {
+    try {
+      const saved = localStorage.getItem('V2K_BAND_CONFIG');
+      if (saved) {
+        const parsed = JSON.parse(saved) as BandPower[];
+        return parsed.map(p => ({ ...p, power: 0 }));
+      }
+    } catch (e) {
+      console.error("Failed to load band config:", e);
+    }
+    return DEFAULT_BANDS;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('V2K_BAND_CONFIG', JSON.stringify(bandPowers));
+  }, [bandPowers]);
   const [tunedFrequency, setTunedFrequency] = useState<number>(0);
   const [filterConfig, setFilterConfig] = useState<AudioFilterConfig>({
     lowPass: 20000,
@@ -41,18 +58,92 @@ export function useAudioEngine() {
   const gainNodeRef = useRef<GainNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const rafRef = useRef<number>();
+  const rafRef = useRef<number>(0);
+  const lastUpdateRef = useRef<number>(0);
   
   // TX Oscillators storage
   const oscillatorsRef = useRef<Map<string, { osc: OscillatorNode, gain: GainNode }>>(new Map());
   const jammerOscRef = useRef<{ osc: OscillatorNode, gain: GainNode } | null>(null);
+
+  const [autoRecordConfig, setAutoRecordConfig] = useState<AutoRecordConfig>({
+    isEnabled: false,
+    threshold: 0.8,
+    targets: ['V2_MICROWAVE', 'EMP', 'VOICE']
+  });
+
+  const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const startManualRecording = useCallback(() => {
+    if (!streamRef.current || !isActive) return;
+    
+    // Ensure the stream has active tracks
+    const activeTracks = streamRef.current.getTracks().filter(t => t.readyState === 'live');
+    if (activeTracks.length === 0) {
+      console.warn("Cannot start recording: No active live tracks found.");
+      return;
+    }
+
+    setIsRecording(true);
+    audioChunksRef.current = [];
+    
+    // Small delay to ensure tracks are ready across all hardware
+    setTimeout(() => {
+      try {
+        if (!streamRef.current || !isActive) {
+          setIsRecording(false);
+          return;
+        }
+
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+        const recorder = new MediaRecorder(streamRef.current, { mimeType });
+        
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        };
+
+        recorder.onstop = () => {
+          setIsRecording(false);
+          const blob = new Blob(audioChunksRef.current, { type: mimeType });
+          const url = URL.createObjectURL(blob);
+          const newRecording: Recording = {
+            id: Math.random().toString(36).substr(2, 9),
+            timestamp: Date.now(),
+            blob,
+            url,
+            duration: 0, // Simplified
+            label: 'AUDIO_SIGNAL_CAPTURE'
+          };
+          setRecordings(prev => [newRecording, ...prev]);
+        };
+
+        if (recorder.state === 'inactive' && streamRef.current.active) {
+          recorder.start();
+          mediaRecorderRef.current = recorder;
+        } else {
+          setIsRecording(false);
+        }
+      } catch (err) {
+        console.error("Failed to start MediaRecorder in useAudioEngine:", err);
+        setIsRecording(false);
+      }
+    }, 200);
+  }, [streamRef, isActive]);
+
+  const stopManualRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+  }, []);
 
   const updateBandPowers = useCallback(() => {
     if (!analyzerRef.current || !isActive) return;
     
     // Throttle band power updates to 10fps for UI smoothness
     const now = performance.now();
-    if (!rafRef.current || now - (rafRef.current as any).lastUpdate > 100) {
+    if (now - lastUpdateRef.current > 100) {
       const dataArray = new Uint8Array(analyzerRef.current.frequencyBinCount);
       analyzerRef.current.getByteFrequencyData(dataArray);
       const sampleRate = audioContextRef.current?.sampleRate || 44100;
@@ -70,84 +161,70 @@ export function useAudioEngine() {
         setTunedFrequency(maxIndex * (sampleRate / fftSize));
       }
 
-      setBandPowers(prev => prev.map(band => {
+      let autoRecordTriggered = false;
+      const nextBandPowers = bandPowers.map(band => {
         const bin = Math.floor(band.frequency / (sampleRate / fftSize));
-        return { ...band, power: dataArray[bin] / 255 };
-      }));
-      (rafRef.current as any).lastUpdate = now;
+        const power = dataArray[bin] / 255;
+        
+        if (autoRecordConfig.isEnabled && 
+            autoRecordConfig.targets.includes(band.category) && 
+            power > autoRecordConfig.threshold && 
+            (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive')) {
+          autoRecordTriggered = true;
+        }
+
+        return { ...band, power };
+      });
+
+      if (autoRecordTriggered) {
+        startManualRecording();
+        setTimeout(() => stopManualRecording(), 5000); // Record 5s burst
+      }
+
+      setBandPowers(nextBandPowers);
+      lastUpdateRef.current = now;
     }
     
     rafRef.current = requestAnimationFrame(updateBandPowers);
-  }, [isActive]);
+  }, [isActive, autoRecordConfig, startManualRecording, stopManualRecording, bandPowers]);
 
   const startEngine = useCallback(async () => {
     setError(null);
     try {
-      // First, get permissions to see device labels
-      let initialStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
-      // Enumerate devices to find the built-in microphone
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const audioInputs = devices.filter(device => device.kind === 'audioinput');
-      
-      // Heuristic to find the built-in microphone
-      // We look for labels that suggest internal/built-in and avoid "headset", "bluetooth", "external"
-      let selectedDeviceId = '';
-      
-      if (preferBuiltIn) {
-        const builtInMic = audioInputs.find(device => {
-          const label = device.label.toLowerCase();
-          return (label.includes('internal') || label.includes('built-in') || label.includes('integrated')) && 
-                 !label.includes('headset') && !label.includes('bluetooth');
-        });
+      // Request audio stream with basic constraints first
+      const constraints: MediaStreamConstraints = {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      };
 
-        if (builtInMic) {
-          selectedDeviceId = builtInMic.deviceId;
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err: any) {
+        // If constraints fail, try basic audio
+        if (err.name === 'OverconstrainedError') {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         } else {
-          // Fallback: find the first one that is NOT a headset or bluetooth
-          const fallbackMic = audioInputs.find(device => {
-            const label = device.label.toLowerCase();
-            return !label.includes('headset') && !label.includes('bluetooth');
-          });
-          if (fallbackMic) {
-            selectedDeviceId = fallbackMic.deviceId;
-          }
+          throw err;
         }
       }
 
-      // If we found a specific device, stop the initial stream and get the specific one
-      if (selectedDeviceId) {
-        initialStream.getTracks().forEach(track => track.stop());
-        initialStream = await navigator.mediaDevices.getUserMedia({ 
-          audio: {
-            deviceId: { exact: selectedDeviceId },
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          } 
-        });
-      } else if (preferBuiltIn) {
-        // If we wanted built-in but didn't find a specific ID, just use the initial stream but re-request with constraints
-        initialStream.getTracks().forEach(track => track.stop());
-        initialStream = await navigator.mediaDevices.getUserMedia({ 
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          } 
-        });
-      }
-      // If !preferBuiltIn, we just keep the initialStream (which is the default system mic)
-
-      const stream = initialStream;
       streamRef.current = stream;
       
-      const activeTrack = stream.getAudioTracks()[0];
-      if (activeTrack) {
-        setActiveMicLabel(activeTrack.label || 'SYSTEM_DEFAULT');
+      // Enumerate devices to update label
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const activeTrack = stream.getAudioTracks()[0];
+        if (activeTrack) {
+          setActiveMicLabel(activeTrack.label || 'SYSTEM_DEFAULT');
+        }
+      } catch (e) {
+        console.warn('Could not enumerate devices for labels', e);
       }
       
-      // ... rest of the setup ...
       const context = new (window.AudioContext || (window as any).webkitAudioContext)({
         latencyHint: 'interactive'
       });
@@ -198,7 +275,7 @@ export function useAudioEngine() {
 
       await context.resume();
       setIsActive(true);
-      (rafRef.current as any) = { lastUpdate: 0 };
+      lastUpdateRef.current = 0;
       rafRef.current = requestAnimationFrame(updateBandPowers);
     } catch (err: any) {
       console.error('Failed to start audio engine:', err);
@@ -211,7 +288,7 @@ export function useAudioEngine() {
       }
       setIsActive(false);
     }
-  }, [updateBandPowers, filterConfig.monitor, preferBuiltIn]);
+  }, [updateBandPowers, filterConfig.monitor]);
 
   const stopEngine = useCallback(() => {
     if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
@@ -367,6 +444,8 @@ export function useAudioEngine() {
     filterConfig,
     setFilterConfig,
     bandPowers,
+    setBandPowers,
+    resetBands: () => setBandPowers(DEFAULT_BANDS),
     tunedFrequency,
     audioContext: audioContextRef.current,
     stream: streamRef.current,
@@ -374,9 +453,16 @@ export function useAudioEngine() {
     setFreqPoints,
     preferBuiltIn,
     setPreferBuiltIn,
-    activeMicLabel,
+    autoMicLabel: activeMicLabel,
     jammerConfig,
     setJammerConfig,
+    autoRecordConfig,
+    setAutoRecordConfig,
+    recordings,
+    setRecordings,
+    isRecording,
+    startManualRecording,
+    stopManualRecording,
     error,
     setError
   };

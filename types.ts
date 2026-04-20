@@ -84,9 +84,27 @@ export interface BroadcastData {
   userName?: string;
   lat?: number;
   lng?: number;
+  frequency?: number; // Custom broadcast frequency
+}
+
+export interface BroadcastLogEntry {
+  id: string;
+  timestamp: number;
+  type: 'VIDEO' | 'AUDIO' | 'IMAGE';
+  url?: string;
+  frequency?: number;
+  location?: { lat: number, lng: number };
+  snapshot?: string;
+}
+
+export interface AutoRecordConfig {
+  isEnabled: boolean;
+  threshold: number; // 0-1
+  targets: FrequencyCategory[];
 }
 
 export interface BroadcastState {
   isBroadcasting: boolean;
   activeBroadcasts: BroadcastData[];
+  logs: BroadcastLogEntry[];
 }

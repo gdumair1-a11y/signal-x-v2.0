@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, Video, VideoOff, Mic, MicOff, Radio, Image as ImageIcon, StopCircle, PlayCircle, RefreshCw } from 'lucide-react';
+import { Camera, Video, VideoOff, Mic, MicOff, Radio, Image as ImageIcon, StopCircle, PlayCircle, RefreshCw, Hash, Save } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
-import { BroadcastData } from '../types';
+import { BroadcastData, BroadcastLogEntry } from '../types';
 
 interface BroadcastPanelProps {
   socket: Socket | null;
@@ -18,8 +18,10 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket, userLoca
   const audioRecorderRef = useRef<MediaRecorder | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [broadcastFrequency, setBroadcastFrequency] = useState<number>(440);
+  const [logs, setLogs] = useState<BroadcastLogEntry[]>([]);
 
-  const startMedia = async (mode: 'user' | 'environment' = facingMode) => {
+  const startMedia = async (mode: 'user' | 'environment' = facingMode): Promise<boolean> => {
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: { 
@@ -35,7 +37,8 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket, userLoca
       }
       
       // Setup audio recorder for streaming
-      const audioRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+      const audioRecorder = new MediaRecorder(mediaStream, { mimeType });
       audioRecorder.ondataavailable = async (e) => {
         if (e.data.size > 0 && isBroadcasting) {
           const reader = new FileReader();
@@ -44,7 +47,8 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket, userLoca
               audio: reader.result, 
               timestamp: Date.now(),
               lat: userLocation?.lat,
-              lng: userLocation?.lng
+              lng: userLocation?.lng,
+              frequency: broadcastFrequency
             });
           };
           reader.readAsDataURL(e.data);
@@ -55,9 +59,11 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket, userLoca
       setHasCamera(true);
       setHasMic(true);
       setError(null);
+      return true;
     } catch (err) {
       console.error("Error accessing media devices:", err);
       setError("Failed to access camera/microphone. Please check permissions.");
+      return false;
     }
   };
 
@@ -72,26 +78,46 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket, userLoca
     setIsBroadcasting(false);
   };
 
-  const toggleBroadcast = () => {
+  const toggleBroadcast = async () => {
     if (!isBroadcasting) {
+      let success = true;
       if (!stream) {
-        startMedia(facingMode).then(() => {
-          setIsBroadcasting(true);
-          audioRecorderRef.current?.start(1000); // Send audio every 1s
-          socket?.emit('broadcast-start', { 
-            timestamp: Date.now(),
-            lat: userLocation?.lat,
-            lng: userLocation?.lng
-          });
-        });
-      } else {
+        success = await startMedia(facingMode);
+      }
+      
+      if (success) {
         setIsBroadcasting(true);
-        audioRecorderRef.current?.start(1000);
+        // Small delay to ensure stream tracks are fully operational across all browsers
+        setTimeout(() => {
+          try {
+            if (audioRecorderRef.current && audioRecorderRef.current.state === 'inactive') {
+              const stream = audioRecorderRef.current.stream;
+              if (stream && stream.active && stream.getTracks().some(t => t.readyState === 'live')) {
+                audioRecorderRef.current.start(1000); // Send audio every 1s
+              } else {
+                console.warn("MediaRecorder start deferred: Stream tracks not live yet.");
+              }
+            }
+          } catch (err) {
+            console.error("Failed to start audio recorder:", err);
+          }
+        }, 200);
+
         socket?.emit('broadcast-start', { 
           timestamp: Date.now(),
           lat: userLocation?.lat,
-          lng: userLocation?.lng
+          lng: userLocation?.lng,
+          frequency: broadcastFrequency
         });
+
+        const newLog: BroadcastLogEntry = {
+          id: Math.random().toString(36).substr(2, 9),
+          timestamp: Date.now(),
+          type: 'VIDEO',
+          frequency: broadcastFrequency,
+          location: userLocation || { lat: 0, lng: 0 }
+        };
+        setLogs(prev => [newLog, ...prev]);
       }
     } else {
       setIsBroadcasting(false);
@@ -111,7 +137,18 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket, userLoca
       await startMedia(newMode);
       if (wasBroadcasting) {
         setIsBroadcasting(true);
-        audioRecorderRef.current?.start(1000);
+        setTimeout(() => {
+          try {
+            if (audioRecorderRef.current && audioRecorderRef.current.state === 'inactive') {
+              const stream = audioRecorderRef.current.stream;
+              if (stream && stream.active && stream.getTracks().some(t => t.readyState === 'live')) {
+                audioRecorderRef.current.start(1000);
+              }
+            }
+          } catch (err) {
+            console.error("Failed to restart audio recorder during flip:", err);
+          }
+        }, 200);
       }
     }
   };
@@ -128,8 +165,19 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket, userLoca
           image: imageData, 
           timestamp: Date.now(),
           lat: userLocation?.lat,
-          lng: userLocation?.lng
+          lng: userLocation?.lng,
+          frequency: broadcastFrequency
         });
+
+        const newLog: BroadcastLogEntry = {
+          id: Math.random().toString(36).substr(2, 9),
+          timestamp: Date.now(),
+          type: 'IMAGE',
+          snapshot: imageData,
+          frequency: broadcastFrequency,
+          location: userLocation || { lat: 0, lng: 0 }
+        };
+        setLogs(prev => [newLog, ...prev]);
       }
     }
   };
@@ -138,17 +186,20 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket, userLoca
     let interval: NodeJS.Timeout;
     if (isBroadcasting && socket && videoRef.current && canvasRef.current) {
       interval = setInterval(() => {
-        const context = canvasRef.current?.getContext('2d');
-        if (context && videoRef.current) {
-          canvasRef.current!.width = 160; // Lower resolution for stream
-          canvasRef.current!.height = 120;
-          context.drawImage(videoRef.current, 0, 0, 160, 120);
-          const frameData = canvasRef.current!.toDataURL('image/jpeg', 0.5);
+        const canvas = canvasRef.current;
+        const video = videoRef.current;
+        const context = canvas?.getContext('2d');
+        if (context && video && canvas) {
+          canvas.width = 160; // Lower resolution for stream
+          canvas.height = 120;
+          context.drawImage(video, 0, 0, 160, 120);
+          const frameData = canvas.toDataURL('image/jpeg', 0.5);
           socket.emit('broadcast-stream', { 
             video: frameData, 
             timestamp: Date.now(),
             lat: userLocation?.lat,
-            lng: userLocation?.lng
+            lng: userLocation?.lng,
+            frequency: broadcastFrequency
           });
         }
       }, 200); // 5 FPS for broadcast
@@ -215,6 +266,20 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket, userLoca
 
       <canvas ref={canvasRef} className="hidden" />
 
+      <div className="flex flex-col gap-2">
+        <label className="text-[10px] text-[#00ff41]/70 uppercase font-mono flex items-center gap-2">
+          <Hash className="w-3 h-3" /> BROADCAST FREQUENCY (Hz)
+        </label>
+        <input 
+          type="number" 
+          value={broadcastFrequency}
+          onChange={(e) => setBroadcastFrequency(Number(e.target.value))}
+          className="bg-black/40 border border-[#00ff41]/30 rounded px-3 py-2 text-[#00ff41] font-mono text-sm focus:outline-none focus:border-[#00ff41]/60"
+          placeholder="Enter frequency..."
+          disabled={isBroadcasting}
+        />
+      </div>
+
       <div className="grid grid-cols-2 gap-2">
         <button
           onClick={toggleBroadcast}
@@ -244,6 +309,30 @@ export const BroadcastPanel: React.FC<BroadcastPanelProps> = ({ socket, userLoca
       <div className="text-[10px] text-[#00ff41]/50 font-mono">
         {isBroadcasting ? 'TRANSMITTING ENCRYPTED FEED...' : 'READY FOR TRANSMISSION'}
       </div>
+
+      {logs.length > 0 && (
+        <div className="mt-4 pt-4 border-top border-[#00ff41]/20 flex flex-col gap-2">
+          <h4 className="text-[10px] text-[#00ff41]/70 font-bold uppercase tracking-widest flex items-center gap-2">
+            <Save className="w-3 h-3" /> BROADCAST HISTORY
+          </h4>
+          <div className="max-h-40 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
+            {logs.map((log) => (
+              <div key={log.id} className="bg-white/5 p-2 rounded border border-[#00ff41]/10 text-[10px] font-mono flex flex-col gap-1">
+                <div className="flex justify-between items-center">
+                  <span className="text-[#00ff41]">[{log.type}] {log.frequency}Hz</span>
+                  <span className="opacity-50">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                </div>
+                {log.snapshot && (
+                  <img src={log.snapshot} alt="Snapshot" className="w-full h-auto rounded border border-[#00ff41]/20 mt-1" referrerPolicy="no-referrer" />
+                )}
+                {log.location && (
+                  <div className="text-[8px] opacity-40">LOC: {log.location.lat.toFixed(4)}, {log.location.lng.toFixed(4)}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

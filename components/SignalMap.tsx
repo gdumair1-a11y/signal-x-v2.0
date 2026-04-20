@@ -22,7 +22,7 @@ const stalkerIcon = createIcon('#ef4444');
 const relayIcon = createIcon('#3b82f6');
 const broadcastIcon = L.divIcon({
   className: 'custom-div-icon',
-  html: `<div style="background-color: #00ff41; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 15px #00ff41; display: flex; items-center; justify-center;"><div style="width: 6px; height: 6px; background-color: white; border-radius: 50%; animation: pulse 1s infinite;"></div></div>`,
+  html: `<div style="background-color: #00ff41; width: 12px; height: 12px; border-radius: 50%; border: 1px solid white;"></div>`,
   iconSize: [16, 16],
   iconAnchor: [8, 8]
 });
@@ -272,8 +272,7 @@ export const SignalMap: React.FC<Props> = ({
                         fillColor: '#a855f7',
                         fillOpacity: 0.2,
                         weight: 1,
-                        dashArray: '2, 5',
-                        className: 'animate-spin-slow'
+                        dashArray: '2, 5'
                       }}
                     />
                   )}

@@ -11,6 +11,7 @@ import { MapPin, Navigation, Shield, AlertTriangle, Activity, List, Settings, Ra
 import { io, Socket } from 'socket.io-client';
 import { BroadcastPanel } from './components/BroadcastPanel';
 import { LiveFeed } from './components/LiveFeed';
+import { BandConfigModal } from './components/BandConfigModal';
 
 const App: React.FC = () => {
   const { 
@@ -26,17 +27,24 @@ const App: React.FC = () => {
     audioContext,
     freqPoints,
     setFreqPoints,
+    setBandPowers,
+    resetBands,
     preferBuiltIn,
     setPreferBuiltIn,
-    activeMicLabel,
+    autoMicLabel: activeMicLabel,
     jammerConfig,
     setJammerConfig,
+    autoRecordConfig,
+    setAutoRecordConfig,
+    recordings,
+    setRecordings,
+    isRecording,
+    startManualRecording,
+    stopManualRecording,
     error: audioEngineError,
     setError: setAudioEngineError
   } = useAudioEngine();
   
-  const [recordings, setRecordings] = useState<Recording[]>([]);
-  const [isRecording, setIsRecording] = useState(false);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [nodes, setNodes] = useState<SignalNode[]>([]);
@@ -45,15 +53,16 @@ const App: React.FC = () => {
   const [isLocating, setIsLocating] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [activeTab, setActiveTab] = useState<'SCANNER' | 'MAP' | 'LOGS' | 'INTEL' | 'BROADCAST'>('SCANNER');
+  const [isBandModalOpen, setIsBandModalOpen] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [broadcasts, setBroadcasts] = useState<Record<string, BroadcastData>>({});
+  const [signalHistory, setSignalHistory] = useState<BroadcastData[]>([]);
   
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-
   const [showHiddenSignatures, setShowHiddenSignatures] = useState(true);
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
   const [jammerTargetId, setJammerTargetId] = useState<string | null>(null);
+  const [autoJamEnabled, setAutoJamEnabled] = useState(false);
+  const [autoJamThreshold, setAutoJamThreshold] = useState(0.8);
 
   // Initialize Socket.io
   useEffect(() => {
@@ -61,17 +70,30 @@ const App: React.FC = () => {
     setSocket(newSocket);
 
     newSocket.on('broadcast-received', (data: BroadcastData) => {
+      if (!data || !data.id) return;
+      const timestamp = Date.now();
       setBroadcasts(prev => ({
         ...prev,
         [data.id]: {
           ...prev[data.id],
           ...data,
-          timestamp: Date.now()
+          timestamp
         }
       }));
+
+      // Update signal history if it contains media
+      if (data.video || data.image || data.audio) {
+        setSignalHistory(prev => {
+          // Limit history to 50 most recent
+          const newItem = { ...data, timestamp };
+          const filtered = prev.filter(item => item.id !== data.id || item.timestamp < Date.now() - 500); // Allow rapid snapshots
+          return [newItem, ...filtered].slice(0, 50);
+        });
+      }
     });
 
     newSocket.on('broadcast-stopped', (data: { id: string }) => {
+      if (!data || !data.id) return;
       setBroadcasts(prev => {
         const next = { ...prev };
         delete next[data.id];
@@ -225,6 +247,34 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [isActive, bandPowers, userLocation]);
 
+  // Auto-Jamming Logic
+  useEffect(() => {
+    if (!autoJamEnabled || !isActive) return;
+
+    const stalkersToJam = nodes.filter(n => 
+      n.type === 'STALKER' && 
+      n.intensity >= autoJamThreshold && 
+      !n.isHidden
+    );
+
+    if (stalkersToJam.length > 0) {
+      // Jam the first one that exceeds threshold if not already jamming it
+      const target = stalkersToJam[0];
+      if (jammerTargetId !== target.id || !jammerConfig.isActive) {
+        setJammerTargetId(target.id);
+        setJammerConfig({ isActive: true, frequency: target.frequency });
+        setLogs(prev => [{
+          id: `AUTO-JAM-${Date.now()}`,
+          timestamp: Date.now(),
+          category: 'CIRCULAR',
+          frequency: target.frequency,
+          intensity: 1,
+          message: `AUTO-JAMMER: High intensity stalker detected (${target.label}). Locking frequency ${(target.frequency / 1000000).toFixed(4)} MHz.`,
+        }, ...prev].slice(0, 50));
+      }
+    }
+  }, [nodes, autoJamEnabled, autoJamThreshold, isActive, jammerTargetId, jammerConfig.isActive, setJammerConfig]);
+
   const handleScan = () => {
     if (!userLocation) return;
     setIsScanning(true);
@@ -345,28 +395,9 @@ const App: React.FC = () => {
 
   const toggleRecording = () => {
     if (!isRecording) {
-      if (!stream) return;
-      chunksRef.current = [];
-      const recorder = new MediaRecorder(stream);
-      recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
-      recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        const url = URL.createObjectURL(blob);
-        const newRec: Recording = {
-          id: `REC-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
-          timestamp: Date.now(),
-          blob,
-          url,
-          duration: 0,
-        };
-        setRecordings(prev => [newRec, ...prev]);
-      };
-      recorder.start();
-      mediaRecorderRef.current = recorder;
-      setIsRecording(true);
+      startManualRecording();
     } else {
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
+      stopManualRecording();
     }
   };
 
@@ -528,13 +559,76 @@ const App: React.FC = () => {
           {/* Broadcast & Live Feed (Visible on xl or when activeTab is BROADCAST) */}
           <div className={`${activeTab === 'BROADCAST' ? 'flex' : 'hidden xl:flex'} flex-col gap-4`}>
             <BroadcastPanel socket={socket} userLocation={userLocation} />
-            <LiveFeed broadcasts={Object.values(broadcasts)} />
+            <LiveFeed 
+              broadcasts={Object.values(broadcasts)} 
+              signalHistory={signalHistory}
+              onClearHistory={() => setSignalHistory([])}
+            />
           </div>
 
           {/* Band Monitoring & Logs (Visible on xl or when activeTab is LOGS) */}
           <div className={`${activeTab === 'LOGS' ? 'flex' : 'hidden xl:flex'} flex-col gap-4 flex-1`}>
             <div className="bg-zinc-900/50 border border-green-900/50 p-4 rounded flex flex-col gap-4">
-              <h3 className="text-[10px] font-black text-green-600 uppercase border-b border-green-900 pb-2">Multi-Band Intercept</h3>
+              <div className="flex items-center justify-between border-b border-green-900 pb-2">
+                <h3 className="text-[10px] font-black text-green-600 uppercase">AUTO-RECORD SETTINGS</h3>
+                <button 
+                  onClick={() => setAutoRecordConfig(p => ({ ...p, isEnabled: !p.isEnabled }))}
+                  className={`px-2 py-0.5 text-[8px] font-bold rounded ${autoRecordConfig.isEnabled ? 'bg-red-500/20 text-red-500 border border-red-500' : 'bg-green-500/20 text-green-500 border border-green-500'}`}
+                >
+                  {autoRecordConfig.isEnabled ? 'ACTIVE' : 'DISABLED'}
+                </button>
+              </div>
+              <div className="flex flex-col gap-2">
+                <div className="flex justify-between text-[8px] font-mono">
+                  <span className="text-green-800">SENSITIVITY THRESHOLD:</span>
+                  <span className="text-green-500">{(autoRecordConfig.threshold * 100).toFixed(0)}%</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0.1" 
+                  max="0.95" 
+                  step="0.05"
+                  value={autoRecordConfig.threshold}
+                  onChange={(e) => setAutoRecordConfig(p => ({ ...p, threshold: parseFloat(e.target.value) }))}
+                  className="w-full accent-green-500 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer mb-2"
+                />
+                <div className="flex justify-between text-[8px] font-mono">
+                  <span className="text-green-800">TARGET BANDS:</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {(['V2_MICROWAVE', 'EMP', 'EMF', 'VOICE', 'CIRCULAR', 'BIO_ORGAN'] as FrequencyCategory[]).map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => {
+                        const targets = autoRecordConfig.targets.includes(cat)
+                          ? autoRecordConfig.targets.filter(t => t !== cat)
+                          : [...autoRecordConfig.targets, cat];
+                        setAutoRecordConfig(p => ({ ...p, targets }));
+                      }}
+                      className={`px-1.5 py-0.5 text-[7px] font-bold rounded border transition-all ${
+                        autoRecordConfig.targets.includes(cat) 
+                          ? 'bg-green-500/20 border-green-500 text-green-500' 
+                          : 'bg-zinc-800 border-zinc-700 text-zinc-600'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-zinc-900/50 border border-green-900/50 p-4 rounded flex flex-col gap-4">
+              <div className="flex items-center justify-between border-b border-green-900 pb-2">
+                <h3 className="text-[10px] font-black text-green-600 uppercase">Multi-Band Intercept</h3>
+                <button 
+                  onClick={() => setIsBandModalOpen(true)}
+                  className="p-1 text-green-700 hover:text-green-400 transition-colors"
+                  title="Configure Bands"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                </button>
+              </div>
               <div className="grid grid-cols-2 xl:grid-cols-1 gap-4 py-2">
                 {bandPowers.map(band => (
                   <div key={band.label} className="flex flex-col gap-1">
@@ -747,13 +841,39 @@ const App: React.FC = () => {
                 <Radio className="w-3 h-3" />
                 Signal Jammer Control
               </h3>
-              {jammerConfig.isActive && (
-                <div className="flex items-center gap-1">
-                  <div className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-ping" />
-                  <span className="text-[7px] text-purple-500 font-black">JAMMING_ACTIVE</span>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                   <span className="text-[7px] text-purple-700 uppercase font-bold">Auto-Jam</span>
+                   <div 
+                    onClick={() => setAutoJamEnabled(!autoJamEnabled)}
+                    className={`w-8 h-4 rounded-full p-0.5 cursor-pointer transition-colors border ${autoJamEnabled ? 'bg-purple-600 border-purple-400' : 'bg-zinc-800 border-zinc-700'}`}
+                  >
+                    <div className={`w-2.5 h-2.5 bg-white rounded-full transition-transform ${autoJamEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                  </div>
                 </div>
-              )}
+                {jammerConfig.isActive && (
+                  <div className="flex items-center gap-1">
+                    <div className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-ping" />
+                    <span className="text-[7px] text-purple-500 font-black">JAMMING_ACTIVE</span>
+                  </div>
+                )}
+              </div>
             </div>
+            
+            {autoJamEnabled && (
+              <div className="bg-purple-900/5 border border-purple-900/20 p-2 rounded flex flex-col gap-1">
+                <div className="flex justify-between items-center">
+                  <span className="text-[7px] text-purple-800 uppercase font-bold">Auto-Jam Threshold</span>
+                  <span className="text-[8px] text-purple-400 font-mono">{(autoJamThreshold * 100).toFixed(0)}%</span>
+                </div>
+                <input 
+                  type="range" min="0.1" max="1" step="0.05" 
+                  value={autoJamThreshold} 
+                  onChange={(e) => setAutoJamThreshold(Number(e.target.value))}
+                  className="w-full accent-purple-500 h-1"
+                />
+              </div>
+            )}
             
             <div className="flex flex-col gap-2">
               {nodes.filter(n => n.type === 'STALKER').length === 0 ? (
@@ -889,6 +1009,14 @@ const App: React.FC = () => {
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #004400; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #00ff00; }
       `}</style>
+
+      <BandConfigModal 
+        isOpen={isBandModalOpen}
+        onClose={() => setIsBandModalOpen(false)}
+        bands={bandPowers}
+        onSave={(newBands) => setBandPowers(newBands)}
+        onReset={resetBands}
+      />
     </div>
   );
 };
