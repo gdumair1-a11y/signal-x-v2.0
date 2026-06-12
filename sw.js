@@ -5,6 +5,7 @@ const ASSETS_TO_CACHE = [
   '/index.tsx',
   '/App.tsx',
   '/index.css',
+  '/app_icon.jpg',
   'https://cdn.tailwindcss.com',
   'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&display=swap',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
