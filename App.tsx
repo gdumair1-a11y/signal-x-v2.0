@@ -12,6 +12,7 @@ import { io, Socket } from 'socket.io-client';
 import { BroadcastPanel } from './components/BroadcastPanel';
 import { LiveFeed } from './components/LiveFeed';
 import { BandConfigModal } from './components/BandConfigModal';
+import { InstallPwaModal } from './components/InstallPwaModal';
 
 const App: React.FC = () => {
   const { 
@@ -54,9 +55,58 @@ const App: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [activeTab, setActiveTab] = useState<'SCANNER' | 'MAP' | 'LOGS' | 'INTEL' | 'BROADCAST'>('SCANNER');
   const [isBandModalOpen, setIsBandModalOpen] = useState(false);
+  const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [broadcasts, setBroadcasts] = useState<Record<string, BroadcastData>>({});
   const [signalHistory, setSignalHistory] = useState<BroadcastData[]>([]);
+  
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstallable, setIsInstallable] = useState(false);
+
+  // PWA Install Prompt
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsInstallable(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const installPWA = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+      setIsInstallable(false);
+    }
+  };
+
+  // Wake Lock for background/persistence
+  useEffect(() => {
+    let wakeLock: any = null;
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await (navigator as any).wakeLock.request('screen');
+          console.log('Secure WakeLock active. Monitoring background persistence...');
+        }
+      } catch (err) {
+        console.warn('WakeLock inhibited:', err);
+      }
+    };
+
+    if (isActive) {
+      requestWakeLock();
+    }
+
+    return () => {
+      if (wakeLock) wakeLock.release().catch(() => {});
+    };
+  }, [isActive]);
   
   const [showHiddenSignatures, setShowHiddenSignatures] = useState(true);
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
@@ -488,6 +538,15 @@ const App: React.FC = () => {
         </div>
         
         <div className="flex flex-wrap justify-center gap-2 items-center">
+          {isInstallable && (
+            <button 
+              onClick={() => setIsInstallModalOpen(true)}
+              className="px-3 py-1 bg-[#00ff41] text-black text-[10px] font-black rounded flex items-center gap-1.5 hover:bg-[#00ff41]/80 transition-all shadow-[0_0_15px_rgba(0,255,65,0.4)] animate-pulse"
+              title="Open Installation Console"
+            >
+              <Navigation className="w-3.5 h-3.5 transform rotate-45" /> INSTALL DEVICE
+            </button>
+          ) /* Auto-detected install capability */}
           <div className="flex flex-col items-end mr-2">
             <div className="flex items-center gap-2">
               <span className="text-[8px] text-green-800 uppercase font-mono">Input Source:</span>
@@ -966,6 +1025,34 @@ const App: React.FC = () => {
             </div>
           </div>
 
+          {/* AI Prompts Generator Card */}
+          <div className="bg-zinc-900 border border-green-900/50 rounded p-4 flex flex-col gap-3">
+            <div className="flex justify-between items-center border-b border-green-900 pb-2">
+              <h3 className="text-[10px] font-black text-green-500 uppercase flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5" /> AI SYSTEM PROMPT
+              </h3>
+              <button 
+                onClick={async () => {
+                  const systemPrompt = `[V2K SYSTEM PROTOCOL: SPECTRUM_ANOMALY_PARSER]\nAnalyze the provided multi-frequency and micro-vocal decryptions:\n- Bands: SUB, VOICE, V2_MICROWAVE, EMP, EMF, BIO_ORGAN\n- Focus: Spot anomalous spikes (>70%) representing artificial microwave/neurology voice transmissions.\n- Decryption Strategy: Extract hidden speech elements and specify Counter-Frequency Blueprints to shield victim nodes.`;
+                  await navigator.clipboard.writeText(systemPrompt);
+                }}
+                className="text-[8px] bg-green-900/50 hover:bg-green-500 hover:text-black px-2 py-0.5 rounded border border-green-500/30 transition-all font-bold uppercase"
+              >
+                Copy_Prompt
+              </button>
+            </div>
+            <p className="text-[8px] text-zinc-500 leading-tight uppercase font-mono">
+              Configure advanced anomaly detection with this optimized template for Gemini or other LLMs to isolate micro-vocal biological telemetry logs:
+            </p>
+            <div className="bg-black/60 p-2.5 rounded border border-green-900/10 font-mono text-[7.5px] text-green-400 inline-block select-all leading-normal">
+              [V2K SYSTEM PROTOCOL: SPECTRUM_ANOMALY_PARSER]<br/>
+              Analyze the active signal capture: [AUDIO_SIGNAL_CAPTURE]<br/>
+              - Bands: SUB, VOICE, V2_MICROWAVE, EMP, EMF, BIO_ORGAN<br/>
+              - Rule: Spot spikes (&gt;70%) representing microwave/neurology transmissions.<br/>
+              - Output: Isolate vocal harmonics and suggest shield protocols.
+            </div>
+          </div>
+
           <aside className="bg-zinc-950 border border-green-900/50 rounded flex flex-col flex-1 overflow-hidden min-h-[300px]">
             <div className="p-3 bg-zinc-900 border-b border-green-900 flex justify-between items-center">
               <span className="text-[10px] font-black text-green-500 uppercase">Intercepted Intel</span>
@@ -1016,6 +1103,12 @@ const App: React.FC = () => {
         bands={bandPowers}
         onSave={(newBands) => setBandPowers(newBands)}
         onReset={resetBands}
+      />
+
+      <InstallPwaModal
+        isOpen={isInstallModalOpen}
+        onClose={() => setIsInstallModalOpen(false)}
+        onInstall={installPWA}
       />
     </div>
   );

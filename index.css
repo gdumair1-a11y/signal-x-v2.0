@@ -1,0 +1,66 @@
+/* Global styling for FrequencyVoice-V2K */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&display=swap');
+
+body {
+  font-family: 'JetBrains Mono', monospace;
+  background-color: #050505;
+  color: #00ff41;
+  margin: 0;
+  overflow-x: hidden;
+}
+
+/* Custom glowing Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #030303;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 65, 0.2);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 65, 0.5);
+}
+
+/* Cyberpunk Scanner effects */
+.glow-text {
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.61);
+}
+
+.glow-border {
+  box-shadow: 0 0 15px rgba(0, 255, 65, 0.2);
+  border-color: rgba(0, 255, 65, 0.5);
+}
+
+/* Adjust map overlay elements to fit look and feel */
+.leaflet-container {
+  background-color: #050505 !important;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.leaflet-popup-content-wrapper {
+  background-color: #0d0d0d !important;
+  color: #00ff41 !important;
+  border: 1px solid #00ff41 !important;
+  border-radius: 4px !important;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.leaflet-popup-tip {
+  background-color: #0d0d0d !important;
+  border: 1px solid #00ff41 !important;
+}
+
+/* Seamless pulse animations */
+@keyframes cyber-pulse {
+  0% { opacity: 0.3; }
+  50% { opacity: 0.95; }
+  100% { opacity: 0.3; }
+}
+
+.cyber-status-pulse {
+  animation: cyber-pulse 2s infinite ease-in-out;
+}

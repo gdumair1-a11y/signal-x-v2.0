@@ -188,6 +188,19 @@ export function useAudioEngine() {
     rafRef.current = requestAnimationFrame(updateBandPowers);
   }, [isActive, autoRecordConfig, startManualRecording, stopManualRecording, bandPowers]);
 
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isActive && audioContextRef.current) {
+        if (audioContextRef.current.state === 'suspended') {
+          audioContextRef.current.resume().then(() => console.log('Audio Recon Resumed.'));
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isActive]);
+
   const startEngine = useCallback(async () => {
     setError(null);
     try {

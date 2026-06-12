@@ -35,6 +35,21 @@
     }
   </style>
 <link rel="stylesheet" href="/index.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#00ff41">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then(reg => {
+          console.log('SW Signal established:', reg.scope);
+        }).catch(err => {
+          console.error('SW Jammed:', err);
+        });
+      });
+    }
+  </script>
 </head>
 <body class="scanlines">
   <div id="root"></div>
