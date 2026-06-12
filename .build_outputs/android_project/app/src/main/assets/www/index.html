@@ -1,0 +1,58 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FrequencyVoice-V2K Pro</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <style>
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background-color: #050505;
+      color: #00ff41;
+      margin: 0;
+      overflow-x: hidden;
+    }
+    canvas {
+      image-rendering: pixelated;
+    }
+    /* Cyberpunk Scanline Effect */
+    .scanlines::before {
+      content: " ";
+      display: block;
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+      z-index: 2;
+      background-size: 100% 2px, 3px 100%;
+      pointer-events: none;
+    }
+  </style>
+  <link rel="manifest" href="./assets/manifest-BDZwW7PP.json">
+  <meta name="theme-color" content="#00ff41">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then(reg => {
+          console.log('SW Signal established:', reg.scope);
+        }).catch(err => {
+          console.error('SW Jammed:', err);
+        });
+      });
+    }
+  </script>
+  <script type="module" crossorigin src="./assets/index-BmQvgjp5.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-6gn1kHmP.css">
+</head>
+<body class="scanlines">
+  <div id="root"></div>
+</body>
+</html>

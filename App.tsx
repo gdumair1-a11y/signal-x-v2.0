@@ -538,15 +538,13 @@ const App: React.FC = () => {
         </div>
         
         <div className="flex flex-wrap justify-center gap-2 items-center">
-          {isInstallable && (
-            <button 
-              onClick={() => setIsInstallModalOpen(true)}
-              className="px-3 py-1 bg-[#00ff41] text-black text-[10px] font-black rounded flex items-center gap-1.5 hover:bg-[#00ff41]/80 transition-all shadow-[0_0_15px_rgba(0,255,65,0.4)] animate-pulse"
-              title="Open Installation Console"
-            >
-              <Navigation className="w-3.5 h-3.5 transform rotate-45" /> INSTALL DEVICE
-            </button>
-          ) /* Auto-detected install capability */}
+          <button 
+            onClick={() => setIsInstallModalOpen(true)}
+            className="px-3 py-1 bg-[#00ff41] text-black text-[10px] font-black rounded flex items-center gap-1.5 hover:bg-[#00ff41]/80 transition-all shadow-[0_0_15px_rgba(0,255,65,0.4)] animate-pulse"
+            title="Open Device Installation & APK Compiler Console"
+          >
+            <Navigation className="w-3.5 h-3.5 transform rotate-45" /> INSTALL DEVICE / APK
+          </button>
           <div className="flex flex-col items-end mr-2">
             <div className="flex items-center gap-2">
               <span className="text-[8px] text-green-800 uppercase font-mono">Input Source:</span>
